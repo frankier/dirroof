@@ -1,0 +1,28 @@
+BasedOnStyle: GNU
+Language: C
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterUnion: false
+  BeforeElse: false
+
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+
+SpaceBeforeParens: ControlStatements
+PointerAlignment: Right
+
+ColumnLimit: 80
+ContinuationIndentWidth: 4
+
+IndentCaseLabels: false
+SortIncludes: Never

@@ -11,4 +11,41 @@
 `dirroof` allows you to specify a maximum size of a directory and deletes the oldest files in order to keep within this size.
 It is intended to be run as a daemon to give a maximum size to a directory.
 
-It uses `fanotify` and requires Linux 5.1+ and glibc.
+It uses `fanotify` (`FAN_REPORT_FID | FAN_REPORT_DFID_NAME`) and requires
+Linux 5.9+ and glibc (unprivileged use requires Linux 5.13+).
+
+## Usage
+
+```
+dirroof -s SIZE [-v] [-f] DIR
+```
+
+- `-s/--size SIZE` (required): the roofline — maximum total size of the
+  regular files directly inside `DIR`. Suffixes K, M, G, T are accepted
+  (e.g. `-s 2G`).
+- `-v/--verbose`: log tracked/deleted files and events.
+- `-f/--delete-open`: also delete files that are currently open (last
+  resort). By default open files are never unlinked.
+
+## How it works
+
+- Two fanotify groups are watched with epoll: one on `DIR` itself
+  (`FAN_CREATE | FAN_DELETE | FAN_MOVED_FROM | FAN_MOVED_TO`), and one with
+  a mark on each file (`FAN_OPEN | FAN_ACCESS | FAN_MODIFY |
+  FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE`), added when the file appears.
+- Each file is kept in a record holding its size, last-write time, last
+  access time and current open count. All records live in a min-heap
+  ordered by `(open_count, last_access)`, so the best deletion candidate is
+  always at the root.
+- After every fanotify event the roofline is enforced: records are popped
+  from the heap and unlinked until the total size is at or below the limit.
+  Files that are currently open sort last and are only deleted with `-f`
+  (unlinking an open file frees no space until the last close anyway).
+- The directory is enumerated with `readdir` only once at startup (to seed
+  the records) and again after a fanotify queue overflow; during normal
+  operation everything is event-driven and sizes/times are refreshed from
+  the per-file events plus `stat()`.
+
+Caveats: fanotify merges same-inode events, so open counts are approximate;
+records are per path, so hard links may be mis-accounted; subdirectories
+and symlinks are ignored.

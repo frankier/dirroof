@@ -49,3 +49,29 @@ dirroof -s SIZE [-v] [-f] DIR
 Caveats: fanotify merges same-inode events, so open counts are approximate;
 records are per path, so hard links may be mis-accounted; subdirectories
 and symlinks are ignored.
+
+## Static builds and packages
+
+Build the static Linux executable, generated manual, Debian package and RPM
+with Docker (BuildKit):
+
+```sh
+docker build --build-arg VERSION=0.1 --output type=local,dest=dist .
+```
+
+The image builds for the Docker host architecture. The resulting executable
+has no shared-library dependencies but still needs the kernel, filesystem and
+fanotify permissions described above. The packaging scripts also accept an
+existing binary and generated man page:
+
+```sh
+scdoc < dirroof.1.scd > dirroof.1
+mkdir -p dist
+scripts/package-deb.sh ./dirroof ./dirroof.1 0.1 dist
+scripts/package-rpm.sh ./dirroof ./dirroof.1 0.1 dist
+```
+
+They require `dpkg-deb` or `rpmbuild` respectively and use the build host's
+architecture; supply a binary built for that architecture. Tagging a commit
+`v` followed by a version publishes the x86-64 static binary and both packages
+as GitHub release assets. The workflow can also be run for an existing tag.

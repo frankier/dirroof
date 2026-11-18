@@ -1,0 +1,37 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v0.1)
+        required: true
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Build static executable and packages
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in v[0-9]*) ;; *) echo 'Expected a version tag beginning with v and a digit' >&2; exit 1;; esac
+          version=${TAG#v}
+          case "$version" in *[!0-9A-Za-z.+~]*) echo 'Unsupported package version' >&2; exit 1;; esac
+          docker build --build-arg "VERSION=$version" --output type=local,dest=dist .
+          mv dist/dirroof "dist/dirroof-${version}-linux-x86_64"
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" "dist/dirroof-${TAG#v}-linux-x86_64" dist/*.deb dist/*.rpm --clobber

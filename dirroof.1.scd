@@ -8,6 +8,8 @@ dirroof - limit the total size of files in a directory
 
 *dirroof* *-s* _SIZE_ [*-v*] [*-f*] _DIR_
 
+*dirroof* *--version*
+
 # DESCRIPTION
 
 *dirroof* watches _DIR_ and deletes files to keep the total size of regular

@@ -7,10 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY dirroof.c dirroof.1.scd ./
 COPY scripts/ scripts/
-ARG VERSION=0.1
+ARG VERSION=0.1.0
 RUN case "$VERSION" in ''|*[!0-9A-Za-z.+~_-]*) exit 1;; esac && \
     mkdir -p /out /root/.scratch && \
-    cc -O2 -static -DPROJECT_VERSION=\"$VERSION\" -o /out/dirroof dirroof.c && \
+    cc -O2 -static -DVERSION=\"$VERSION\" -o /out/dirroof dirroof.c && \
     scdoc < dirroof.1.scd > /out/dirroof.1 && \
     scripts/package-deb.sh /out/dirroof /out/dirroof.1 "$VERSION" /out && \
     scripts/package-rpm.sh /out/dirroof /out/dirroof.1 "$VERSION" /out

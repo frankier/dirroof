@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag (for example v0.1)
+        description: Existing version tag (for example v0.1.0)
         required: true
 permissions:
   contents: write
@@ -25,7 +25,7 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = branch ]; then TAG=v0.1; fi
+          if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = branch ]; then TAG=v0.1.0; fi
           case "$TAG" in v[0-9]*) ;; *) echo 'Expected a version tag beginning with v and a digit' >&2; exit 1;; esac
           version=${TAG#v}
           case "$version" in *[!0-9A-Za-z.+~]*) echo 'Unsupported package version' >&2; exit 1;; esac

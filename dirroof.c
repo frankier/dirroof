@@ -26,10 +26,10 @@
 #define FILE_EVENTS                                                            \
     (FAN_OPEN | FAN_ACCESS | FAN_MODIFY | FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE)
 
-#ifndef PROJECT_VERSION
-#define PROJECT_VERSION "0.1"
+#ifndef VERSION
+#define VERSION "0.1.0"
 #endif
-const char *argp_program_version = "dirroof " PROJECT_VERSION;
+const char *argp_program_version = "dirroof " VERSION;
 
 /* Program documentation. */
 static char doc[] = "dirroof keeps a directory's size under a limit (roofline) "

@@ -18,6 +18,7 @@ Linux 5.9+ and glibc (unprivileged use requires Linux 5.13+).
 
 ```
 dirroof -s SIZE [-v] [-f] DIR
+dirroof --version
 ```
 
 - `-s/--size SIZE` (required): the roofline — maximum total size of the
@@ -26,6 +27,7 @@ dirroof -s SIZE [-v] [-f] DIR
 - `-v/--verbose`: log tracked/deleted files and events.
 - `-f/--delete-open`: also delete files that are currently open (last
   resort). By default open files are never unlinked.
+- `-V/--version`: print the program version and exit.
 
 ## How it works
 
@@ -56,7 +58,7 @@ Build the static Linux executable, generated manual, Debian package and RPM
 with Docker (BuildKit):
 
 ```sh
-docker build --build-arg VERSION=0.1 --output type=local,dest=dist .
+docker build --build-arg VERSION=0.1.0 --output type=local,dest=dist .
 ```
 
 The image builds for the Docker host architecture. The resulting executable
@@ -67,8 +69,8 @@ existing binary and generated man page:
 ```sh
 scdoc < dirroof.1.scd > dirroof.1
 mkdir -p dist
-scripts/package-deb.sh ./dirroof ./dirroof.1 0.1 dist
-scripts/package-rpm.sh ./dirroof ./dirroof.1 0.1 dist
+scripts/package-deb.sh ./dirroof ./dirroof.1 0.1.0 dist
+scripts/package-rpm.sh ./dirroof ./dirroof.1 0.1.0 dist
 ```
 
 They require `dpkg-deb` or `rpmbuild` respectively and use the build host's

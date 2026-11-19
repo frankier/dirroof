@@ -252,7 +252,8 @@ struct record {
     size_t heap_idx;    /* position of this record in the heap array */
 };
 
-static struct record heap[MAXFILES];
+/* Allocate the records at startup so their zeroed storage stays off disk. */
+static struct record *heap;
 static size_t nheap;
 
 static char watch_dir[PATH_MAX];
@@ -682,6 +683,12 @@ main(int argc, char **argv)
     /* Line-buffered output, so verbose messages appear promptly even
        when stdout is a pipe or log file.  */
     setvbuf(stdout, NULL, _IOLBF, 0);
+
+    heap = calloc(MAXFILES, sizeof(*heap));
+    if (heap == NULL) {
+        perror("calloc(file records)");
+        exit(EXIT_FAILURE);
+    }
 
     /* File handle of watch_dir, to tell events for direct children of
        watch_dir apart from events for files in subdirectories.  */

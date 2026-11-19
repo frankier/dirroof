@@ -57,6 +57,7 @@ COPY dirroof.c Makefile VERSION ./
 RUN version=$(cat VERSION) && \
     make CC=/opt/filc/build/bin/clang CFLAGS=-O2 LDFLAGS="-static -Wl,--build-id" && \
     mv dirroof /dirroof-filc && \
+    strip --strip-debug /dirroof-filc && \
     readelf -lW -dW /dirroof-filc > /dirroof.elf && \
     ! grep -Eq '^[[:space:]]*INTERP|\(NEEDED\)' /dirroof.elf && \
     test "$(/dirroof-filc --version)" = "dirroof $version" && \

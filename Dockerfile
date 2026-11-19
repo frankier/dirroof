@@ -5,17 +5,16 @@ FROM debian:bookworm-slim AS package-tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential scdoc rpm ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY dirroof.1.scd ./
+COPY dirroof.1.scd VERSION ./
 COPY scripts/ scripts/
 RUN mkdir -p /out /root/.scratch && scdoc < dirroof.1.scd > /out/dirroof.1
 
 FROM package-tools AS build
-COPY dirroof.c ./
-ARG VERSION=0.1.0
-RUN case "$VERSION" in ''|*[!0-9A-Za-z.+~_-]*) exit 1;; esac && \
-    cc -O2 -static -DVERSION=\"$VERSION\" -o /out/dirroof dirroof.c && \
-    scripts/package-deb.sh /out/dirroof /out/dirroof.1 "$VERSION" /out && \
-    scripts/package-rpm.sh /out/dirroof /out/dirroof.1 "$VERSION" /out
+COPY dirroof.c Makefile ./
+RUN version=$(cat VERSION) && \
+    make CFLAGS=-O2 LDFLAGS=-static && mv dirroof /out/dirroof && \
+    scripts/package-deb.sh /out/dirroof /out/dirroof.1 "$version" /out && \
+    scripts/package-rpm.sh /out/dirroof /out/dirroof.1 "$version" /out
 
 FROM debian:trixie-slim AS filc
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -54,14 +53,13 @@ RUN set -eu; \
     cd /opt/filc; \
     rm -rf /opt/filc-source
 WORKDIR /src
-COPY dirroof.c ./
-ARG VERSION=0.1.0
-RUN case "$VERSION" in ''|*[!0-9A-Za-z.+~_-]*) exit 1;; esac && \
-    /opt/filc/build/bin/clang -O2 -static -Wl,--build-id -DVERSION=\"$VERSION\" \
-        -o /dirroof-filc dirroof.c && \
+COPY dirroof.c Makefile VERSION ./
+RUN version=$(cat VERSION) && \
+    make CC=/opt/filc/build/bin/clang CFLAGS=-O2 LDFLAGS="-static -Wl,--build-id" && \
+    mv dirroof /dirroof-filc && \
     readelf -lW -dW /dirroof-filc > /dirroof.elf && \
     ! grep -Eq '^[[:space:]]*INTERP|\(NEEDED\)' /dirroof.elf && \
-    test "$(/dirroof-filc --version)" = "dirroof $VERSION" && \
+    test "$(/dirroof-filc --version)" = "dirroof $version" && \
     /dirroof-filc --help >/dev/null && \
     for notice in MUSL PAS LLVM; do \
         printf '\n%s-LICENSE.txt\n\n' "$notice"; \
@@ -69,12 +67,12 @@ RUN case "$VERSION" in ''|*[!0-9A-Za-z.+~_-]*) exit 1;; esac && \
     done > /dirroof-filc-licenses.txt
 
 FROM package-tools AS filc-packages
-ARG VERSION=0.1.0
 COPY --from=filc /dirroof-filc /filc-out/dirroof-filc
 COPY --from=filc /dirroof-filc-licenses.txt /filc-out/
-RUN scripts/package-deb.sh /filc-out/dirroof-filc /out/dirroof.1 "$VERSION" \
+RUN version=$(cat VERSION) && \
+    scripts/package-deb.sh /filc-out/dirroof-filc /out/dirroof.1 "$version" \
         /filc-out dirroof-filc /filc-out/dirroof-filc-licenses.txt && \
-    scripts/package-rpm.sh /filc-out/dirroof-filc /out/dirroof.1 "$VERSION" \
+    scripts/package-rpm.sh /filc-out/dirroof-filc /out/dirroof.1 "$version" \
         /filc-out dirroof-filc /filc-out/dirroof-filc-licenses.txt && \
     cp /out/dirroof.1 /filc-out/
 

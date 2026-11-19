@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag (for example v0.1.0)
+        description: Existing tag matching the version in VERSION
         required: true
   pull_request:
 permissions:
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
           persist-credentials: false
       - name: Build static executable and packages
         env:
@@ -27,14 +27,15 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$EVENT_NAME" = pull_request ] || { [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = branch ]; }; then
-            TAG=v0.1.0
+          version=$(cat VERSION)
+          if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$REF_TYPE" = tag ]; then
+            if [ "$TAG" != "v$version" ]; then
+              printf 'Release tag %s does not match VERSION (expected v%s)\n' "$TAG" "$version" >&2
+              exit 1
+            fi
           fi
-          case "$TAG" in v[0-9]*) ;; *) echo 'Expected a version tag beginning with v and a digit' >&2; exit 1;; esac
-          version=${TAG#v}
-          case "$version" in *[!0-9A-Za-z.+~]*) echo 'Unsupported package version' >&2; exit 1;; esac
-          docker build --target artifacts --build-arg "VERSION=$version" --output type=local,dest=dist .
-          docker build --target filc-artifacts --build-arg "VERSION=$version" --output type=local,dest=dist-filc .
+          docker build --target artifacts --output type=local,dest=dist .
+          docker build --target filc-artifacts --output type=local,dest=dist-filc .
           mv dist/dirroof "dist/dirroof-${version}-linux-x86_64"
           mv dist-filc/dirroof-filc "dist-filc/dirroof-filc-${version}-linux-x86_64"
       - name: Test Fil-C fanotify

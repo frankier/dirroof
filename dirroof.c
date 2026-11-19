@@ -47,10 +47,6 @@
 #define FILE_EVENTS                                                            \
     (FAN_OPEN | FAN_ACCESS | FAN_MODIFY | FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE)
 
-#ifndef VERSION
-#define VERSION "0.1.0"
-#endif
-
 struct arguments {
     char *dir;
     unsigned long long roof;

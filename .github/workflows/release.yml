@@ -10,34 +10,96 @@ on:
       tag:
         description: Existing version tag (for example v0.1.0)
         required: true
+  pull_request:
 permissions:
-  contents: write
+  contents: read
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
       - name: Build static executable and packages
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = branch ]; then TAG=v0.1.0; fi
+          if [ "$EVENT_NAME" = pull_request ] || { [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = branch ]; }; then
+            TAG=v0.1.0
+          fi
           case "$TAG" in v[0-9]*) ;; *) echo 'Expected a version tag beginning with v and a digit' >&2; exit 1;; esac
           version=${TAG#v}
           case "$version" in *[!0-9A-Za-z.+~]*) echo 'Unsupported package version' >&2; exit 1;; esac
-          docker build --build-arg "VERSION=$version" --output type=local,dest=dist .
+          docker build --target artifacts --build-arg "VERSION=$version" --output type=local,dest=dist .
+          docker build --target filc-artifacts --build-arg "VERSION=$version" --output type=local,dest=dist-filc .
           mv dist/dirroof "dist/dirroof-${version}-linux-x86_64"
-      - name: Publish release assets
+          mv dist-filc/dirroof-filc "dist-filc/dirroof-filc-${version}-linux-x86_64"
+      - name: Test Fil-C fanotify
+        run: |
+          work=$(mktemp -d "$RUNNER_TEMP/dirroof.XXXXXXXX")
+          mkdir "$work/watch"
+          head -c 32 /dev/zero > "$work/watch/old"
+          touch -a -d @1 "$work/watch/old"
+          dist-filc/dirroof-filc-*-linux-x86_64 -s 40 -vf "$work/watch" > "$work/log" 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            cat "$work/log"
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          for attempt in {1..100}; do
+            if grep -q 'tracking ' "$work/log"; then break; fi
+            kill -0 "$pid"
+            sleep 0.05
+          done
+          grep -q 'tracking ' "$work/log"
+          head -c 32 /dev/zero > "$work/watch/new"
+          for attempt in {1..100}; do
+            if [ ! -e "$work/watch/old" ]; then break; fi
+            kill -0 "$pid"
+            sleep 0.05
+          done
+          test ! -e "$work/watch/old"
+          test -s "$work/watch/new"
+      - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        with:
+          name: release-assets
+          path: |
+            dist/dirroof-*-linux-x86_64
+            dist/*.deb
+            dist/*.rpm
+            dist-filc/dirroof-filc-*-linux-x86_64
+            dist-filc/*.deb
+            dist-filc/*.rpm
+            dist-filc/dirroof-filc-licenses.txt
+          if-no-files-found: error
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           fi
-          gh release upload "$TAG" "dist/dirroof-${TAG#v}-linux-x86_64" dist/*.deb dist/*.rpm --clobber
+          gh release upload "$TAG" \
+            "assets/dist/dirroof-${TAG#v}-linux-x86_64" assets/dist/*.deb assets/dist/*.rpm \
+            "assets/dist-filc/dirroof-filc-${TAG#v}-linux-x86_64" assets/dist-filc/*.deb assets/dist-filc/*.rpm \
+            assets/dist-filc/dirroof-filc-licenses.txt --clobber

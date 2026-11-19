@@ -1,0 +1,20 @@
+--- a/libpas/src/libpas/filc_runtime.c
++++ b/libpas/src/libpas/filc_runtime.c
+@@ -104,2 +104,3 @@
+ #include <sys/inotify.h>
++#include <sys/fanotify.h>
+ #include <sys/klog.h>
+@@ -155,3 +156,2 @@
+ #include <sys/pidfd.h>
+-#include <sys/fanotify.h>
+ #endif
+@@ -13711,3 +13711,3 @@
+ {
+-#if PAS_GLIBC
++#if !PAS_COSMO
+     return FILC_SYSCALL(my_thread, fanotify_init(flags, event_flags));
+@@ -13724,3 +13724,3 @@
+ {
+-#if PAS_GLIBC
++#if !PAS_COSMO
+     char* path = filc_check_and_get_tmp_str(my_thread, path_ptr);

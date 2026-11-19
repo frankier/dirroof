@@ -54,17 +54,19 @@ and symlinks are ignored.
 
 ## Static builds and packages
 
+Run `make` to compile a local executable with the system C compiler.
+
 Build the static Linux executable, generated manual, Debian package and RPM
 with Docker (BuildKit):
 
 ```sh
-docker build --build-arg VERSION=0.1.0 --output type=local,dest=dist .
+docker build --output type=local,dest=dist .
 ```
 
 Build the Fil-C variant with musl on an x86-64 or ARM64 Docker host:
 
 ```sh
-docker build --target filc-artifacts --build-arg VERSION=0.1.0 --output type=local,dest=dist-filc .
+docker build --target filc-artifacts --output type=local,dest=dist-filc .
 ```
 
 The Fil-C target uses a pinned [Fil-C toolchain](https://fil-c.org/install_pizfix)
@@ -80,12 +82,15 @@ The packaging scripts also accept an existing binary and generated man page:
 ```sh
 scdoc < dirroof.1.scd > dirroof.1
 mkdir -p dist
-scripts/package-deb.sh ./dirroof ./dirroof.1 0.1.0 dist
-scripts/package-rpm.sh ./dirroof ./dirroof.1 0.1.0 dist
+scripts/package-deb.sh ./dirroof ./dirroof.1 "$(cat VERSION)" dist
+scripts/package-rpm.sh ./dirroof ./dirroof.1 "$(cat VERSION)" dist
 ```
 
 They require `dpkg-deb` or `rpmbuild` respectively and use the build host's
-architecture; supply a binary built for that architecture. Tagging a commit
-`v` followed by a version publishes the x86-64 static binaries and packages
-for both variants as GitHub release assets. Look for `dirroof-filc` in the
-Fil-C asset names. The workflow can also be run for an existing tag.
+architecture. Supply a binary built for that architecture.
+
+To release, update and commit `VERSION`, then create and push the matching
+tag with `git tag "v$(cat VERSION)"`. GitHub Actions checks that the tag
+matches the version in the tagged commit before publishing the x86-64 static
+binaries and packages for both variants. You can also run the workflow
+manually for an existing tag whose commit contains the matching `VERSION`.

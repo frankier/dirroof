@@ -12,7 +12,7 @@
 It is intended to be run as a daemon to give a maximum size to a directory.
 
 It uses `fanotify` (`FAN_REPORT_FID | FAN_REPORT_DFID_NAME`) and requires
-Linux 5.9+ and glibc (unprivileged use requires Linux 5.13+).
+Linux 5.9+ (unprivileged use requires Linux 5.13+).
 
 ## Usage
 
@@ -61,10 +61,21 @@ with Docker (BuildKit):
 docker build --build-arg VERSION=0.1.0 --output type=local,dest=dist .
 ```
 
-The image builds for the Docker host architecture. The resulting executable
-has no shared-library dependencies but still needs the kernel, filesystem and
-fanotify permissions described above. The packaging scripts also accept an
-existing binary and generated man page:
+Build the Fil-C variant with musl on an x86-64 or ARM64 Docker host:
+
+```sh
+docker build --target filc-artifacts --build-arg VERSION=0.1.0 --output type=local,dest=dist-filc .
+```
+
+The Fil-C target uses a pinned [Fil-C toolchain](https://fil-c.org/install_pizfix)
+with a small runtime patch that enables fanotify on musl. It exports
+`dirroof-filc` with its license notices, manual, Debian package and RPM.
+Both executables are statically linked and require the kernel,
+filesystem and fanotify permissions described above. The `dirroof` and
+`dirroof-filc` packages both install `/usr/bin/dirroof` and are mutually
+exclusive.
+
+The packaging scripts also accept an existing binary and generated man page:
 
 ```sh
 scdoc < dirroof.1.scd > dirroof.1
@@ -75,5 +86,6 @@ scripts/package-rpm.sh ./dirroof ./dirroof.1 0.1.0 dist
 
 They require `dpkg-deb` or `rpmbuild` respectively and use the build host's
 architecture; supply a binary built for that architecture. Tagging a commit
-`v` followed by a version publishes the x86-64 static binary and both packages
-as GitHub release assets. The workflow can also be run for an existing tag.
+`v` followed by a version publishes the x86-64 static binaries and packages
+for both variants as GitHub release assets. Look for `dirroof-filc` in the
+Fil-C asset names. The workflow can also be run for an existing tag.

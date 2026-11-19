@@ -4,15 +4,36 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <argp.h>
 #include <ctype.h>
 #include <dirent.h>
+#ifdef __GLIBC__
+#include <argp.h>
+#else
+#include <getopt.h>
+#endif
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/fanotify.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Fil-C's musl syscall dispatcher does not route these calls to the
+   runtime. Use the checked runtime entry points directly. */
+#if defined(__FILC__) && !defined(__GLIBC__)
+#include <pizlonated_syscalls.h>
+#define fanotify_init zsys_fanotify_init
+#define fanotify_mark zsys_fanotify_mark
+#define name_to_handle_at zsys_name_to_handle_at
+#endif
+
+/* Linux fanotify ABI values missing from some musl headers. */
+#ifndef FAN_EVENT_INFO_TYPE_OLD_DFID_NAME
+#define FAN_EVENT_INFO_TYPE_OLD_DFID_NAME 10
+#endif
+#ifndef FAN_EVENT_INFO_TYPE_NEW_DFID_NAME
+#define FAN_EVENT_INFO_TYPE_NEW_DFID_NAME 12
+#endif
 
 #define MAXFILES 4096
 
@@ -29,6 +50,53 @@
 #ifndef VERSION
 #define VERSION "0.1.0"
 #endif
+
+struct arguments {
+    char *dir;
+    unsigned long long roof;
+    int verbose;
+    int delete_open;
+};
+
+/* Return the diagnostic for a malformed size, or set the parsed size. */
+static const char *
+parse_size(const char *arg, unsigned long long *size)
+{
+    char *end;
+    unsigned long long mult = 1;
+
+    errno = 0;
+    unsigned long long value = strtoull(arg, &end, 10);
+    if (end == arg || errno != 0) return "invalid size:";
+
+    if (*end != '\0') {
+        switch (tolower((unsigned char)*end)) {
+        case 'k':
+            mult = 1ULL << 10;
+            break;
+        case 'm':
+            mult = 1ULL << 20;
+            break;
+        case 'g':
+            mult = 1ULL << 30;
+            break;
+        case 't':
+            mult = 1ULL << 40;
+            break;
+        default:
+            return "invalid size suffix in";
+        }
+        end++;
+        if (*end == 'b' || *end == 'B') end++;
+        if (*end != '\0') return "invalid size:";
+    }
+    if (value > ULLONG_MAX / mult) return "size too large:";
+
+    *size = value * mult;
+    return NULL;
+}
+
+#ifdef __GLIBC__
 const char *argp_program_version = "dirroof " VERSION;
 
 /* Program documentation. */
@@ -46,14 +114,6 @@ static struct argp_option options[]
         { "delete-open", 'f', 0, 0,
           "Also delete files that are currently open (last resort)" },
         { 0 } };
-
-/* Used by main to communicate with parse_opt. */
-struct arguments {
-    char *dir;
-    unsigned long long roof;
-    int verbose;
-    int delete_open;
-};
 
 /* Parse a single option. */
 static error_t
@@ -73,41 +133,8 @@ parse_opt(int key, char *arg, struct argp_state *state)
         break;
 
     case 's': {
-        char *end = NULL;
-        unsigned long long mult = 1;
-        unsigned long long value = 0;
-
-        errno = 0;
-        value = strtoull(arg, &end, 10);
-        if (end == arg || errno != 0)
-            argp_error(state, "invalid size: '%s'", arg);
-
-        if (*end != '\0') {
-            switch (tolower((unsigned char)*end)) {
-            case 'k':
-                mult = 1ULL << 10;
-                break;
-            case 'm':
-                mult = 1ULL << 20;
-                break;
-            case 'g':
-                mult = 1ULL << 30;
-                break;
-            case 't':
-                mult = 1ULL << 40;
-                break;
-            default:
-                argp_error(state, "invalid size suffix in '%s'", arg);
-            }
-            end++;
-            if (*end == 'b' || *end == 'B') /* accept e.g. 2GB */
-                end++;
-            if (*end != '\0') argp_error(state, "invalid size: '%s'", arg);
-        }
-        if (value > ULLONG_MAX / mult)
-            argp_error(state, "size too large: '%s'", arg);
-
-        arguments->roof = value * mult;
+        const char *error = parse_size(arg, &arguments->roof);
+        if (error != NULL) argp_error(state, "%s '%s'", error, arg);
         break;
     }
 
@@ -131,6 +158,91 @@ parse_opt(int key, char *arg, struct argp_state *state)
     }
     return 0;
 }
+
+static void
+parse_arguments(int argc, char **argv, struct arguments *arguments)
+{
+    static struct argp argp = { options, parse_opt, args_doc, doc };
+    argp_parse(&argp, argc, argv, 0, 0, arguments);
+}
+#else
+static void
+print_usage(FILE *stream)
+{
+    fputs("Usage: dirroof -s SIZE [-v] [-f] DIR\n", stream);
+}
+
+static void
+parse_arguments(int argc, char **argv, struct arguments *arguments)
+{
+    enum { HELP = 256, USAGE };
+    static const struct option options[] = {
+        { "verbose", no_argument, NULL, 'v' },
+        { "size", required_argument, NULL, 's' },
+        { "delete-open", no_argument, NULL, 'f' },
+        { "help", no_argument, NULL, HELP },
+        { "usage", no_argument, NULL, USAGE },
+        { "version", no_argument, NULL, 'V' },
+        { 0 }
+    };
+    int option;
+
+    /* Musl reports unknown long options as '?' with optopt set to zero.
+       Its successful short options leave optopt untouched. */
+    optopt = 0;
+    while ((option = getopt_long(argc, argv, "vs:fV?", options, NULL)) != -1) {
+        switch (option) {
+        case 'v':
+            arguments->verbose = 1;
+            break;
+        case 'f':
+            arguments->delete_open = 1;
+            break;
+        case 's': {
+            const char *error = parse_size(optarg, &arguments->roof);
+            if (error != NULL) {
+                fprintf(stderr, "dirroof: %s '%s'\n", error, optarg);
+                exit(64);
+            }
+            break;
+        }
+        case 'V':
+            puts("dirroof " VERSION);
+            exit(EXIT_SUCCESS);
+        case USAGE:
+            print_usage(stdout);
+            exit(EXIT_SUCCESS);
+        case '?':
+            if (optopt != 0 || strncmp(argv[optind - 1], "--", 2) == 0) {
+                print_usage(stderr);
+                exit(64);
+            }
+            /* fall through */
+        case HELP:
+            print_usage(stdout);
+            puts("dirroof keeps a directory's size under a limit (roofline) "
+                 "by removing older files\n\n"
+                 "  -s, --size=SIZE    Maximum total size, e.g. 500M or 2G (required)\n"
+                 "  -v, --verbose      Produce verbose output\n"
+                 "  -f, --delete-open  Also delete files that are currently open\n"
+                 "  -?, --help         Show help\n"
+                 "      --usage        Show a short usage message\n"
+                 "  -V, --version      Show the version");
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if (argc - optind != 1) {
+        print_usage(stderr);
+        exit(64);
+    }
+    if (arguments->roof == 0) {
+        fputs("dirroof: a maximum size is required, e.g. -s 2G\n", stderr);
+        exit(64);
+    }
+    arguments->dir = argv[optind];
+}
+#endif
 
 /* One tracked file.  The heap array below holds all live records, ordered
    as a min-heap by (open_count, last_access, path): the record at the root
@@ -161,8 +273,6 @@ static int g2fd = -1; /* fanotify group for per-file events */
 static char dir_handle_buf[sizeof(struct file_handle) + 128];
 static struct file_handle *dir_handle = (struct file_handle *)dir_handle_buf;
 static int dir_handle_valid;
-
-static struct argp argp = { options, parse_opt, args_doc, doc };
 
 /* ---------------- min-heap ---------------- */
 
@@ -555,7 +665,7 @@ main(int argc, char **argv)
     arguments.verbose = 0;
     arguments.roof = 0;
     arguments.delete_open = 0;
-    argp_parse(&argp, argc, argv, 0, 0, &arguments);
+    parse_arguments(argc, argv, &arguments);
 
     if (stat(arguments.dir, &st) == -1 || !S_ISDIR(st.st_mode)) {
         fprintf(stderr, "dirroof: %s: not a directory\n", arguments.dir);

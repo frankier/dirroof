@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include "recursive.h"
 
 /* Fil-C's musl syscall dispatcher does not route these calls to the
    runtime. Use the checked runtime entry points directly. */
@@ -47,12 +48,33 @@
 #define FILE_EVENTS                                                            \
     (FAN_OPEN | FAN_ACCESS | FAN_MODIFY | FAN_CLOSE_WRITE | FAN_CLOSE_NOWRITE)
 
-struct arguments {
-    char *dir;
-    unsigned long long roof;
-    int verbose;
-    int delete_open;
+enum {
+    EVICT_DEPTH = 512,
+    PRUNE_EMPTY,
 };
+
+static int
+parse_depth(const char *arg, unsigned int *depth)
+{
+    char *end;
+    errno = 0;
+    unsigned long value = strtoul(arg, &end, 10);
+    if (!isdigit((unsigned char)arg[0]) || *end != '\0' || errno
+        || value == 0 || value > UINT_MAX)
+        return 0;
+    *depth = (unsigned int)value;
+    return 1;
+}
+
+static const char *
+validate_recursive_options(struct arguments *arguments)
+{
+    if (arguments->eviction_depth && arguments->prune_empty)
+        return "--evict-depth and --prune-empty cannot be used together";
+    arguments->recursive |= arguments->eviction_depth != 0
+                            || arguments->prune_empty;
+    return NULL;
+}
 
 /* Return the diagnostic for a malformed size, or set the parsed size. */
 static const char *
@@ -109,6 +131,11 @@ static struct argp_option options[]
           "Maximum total size of DIR, e.g. 500M or 2G (required)" },
         { "delete-open", 'f', 0, 0,
           "Also delete files that are currently open (last resort)" },
+        { "recursive", 'r', 0, 0, "Track files at every depth" },
+        { "evict-depth", EVICT_DEPTH, "DEPTH", 0,
+          "Evict whole directories at DEPTH (implies --recursive)" },
+        { "prune-empty", PRUNE_EMPTY, 0, 0,
+          "Remove directories emptied by file eviction (implies --recursive)" },
         { 0 } };
 
 /* Parse a single option. */
@@ -128,6 +155,19 @@ parse_opt(int key, char *arg, struct argp_state *state)
         arguments->delete_open = 1;
         break;
 
+    case 'r':
+        arguments->recursive = 1;
+        break;
+
+    case EVICT_DEPTH:
+        if (!parse_depth(arg, &arguments->eviction_depth))
+            argp_error(state, "invalid eviction depth: '%s'", arg);
+        break;
+
+    case PRUNE_EMPTY:
+        arguments->prune_empty = 1;
+        break;
+
     case 's': {
         const char *error = parse_size(arg, &arguments->roof);
         if (error != NULL) argp_error(state, "%s '%s'", error, arg);
@@ -142,12 +182,15 @@ parse_opt(int key, char *arg, struct argp_state *state)
 
         break;
 
-    case ARGP_KEY_END:
+    case ARGP_KEY_END: {
         if (state->arg_num < 1) /* Not enough arguments. */
             argp_usage(state);
         if (arguments->roof == 0) /* No roofline given. */
             argp_error(state, "a maximum size is required, e.g. -s 2G");
+        const char *error = validate_recursive_options(arguments);
+        if (error != NULL) argp_error(state, "%s", error);
         break;
+    }
 
     default:
         return ARGP_ERR_UNKNOWN;
@@ -165,7 +208,8 @@ parse_arguments(int argc, char **argv, struct arguments *arguments)
 static void
 print_usage(FILE *stream)
 {
-    fputs("Usage: dirroof -s SIZE [-v] [-f] DIR\n", stream);
+    fputs("Usage: dirroof -s SIZE [-v] [-f] [-r] "
+          "[--evict-depth DEPTH | --prune-empty] DIR\n", stream);
 }
 
 static void
@@ -176,6 +220,9 @@ parse_arguments(int argc, char **argv, struct arguments *arguments)
         { "verbose", no_argument, NULL, 'v' },
         { "size", required_argument, NULL, 's' },
         { "delete-open", no_argument, NULL, 'f' },
+        { "recursive", no_argument, NULL, 'r' },
+        { "evict-depth", required_argument, NULL, EVICT_DEPTH },
+        { "prune-empty", no_argument, NULL, PRUNE_EMPTY },
         { "help", no_argument, NULL, HELP },
         { "usage", no_argument, NULL, USAGE },
         { "version", no_argument, NULL, 'V' },
@@ -186,13 +233,25 @@ parse_arguments(int argc, char **argv, struct arguments *arguments)
     /* Musl reports unknown long options as '?' with optopt set to zero.
        Its successful short options leave optopt untouched. */
     optopt = 0;
-    while ((option = getopt_long(argc, argv, "vs:fV?", options, NULL)) != -1) {
+    while ((option = getopt_long(argc, argv, "vs:frV?", options, NULL)) != -1) {
         switch (option) {
         case 'v':
             arguments->verbose = 1;
             break;
         case 'f':
             arguments->delete_open = 1;
+            break;
+        case 'r':
+            arguments->recursive = 1;
+            break;
+        case EVICT_DEPTH:
+            if (!parse_depth(optarg, &arguments->eviction_depth)) {
+                fprintf(stderr, "dirroof: invalid eviction depth: '%s'\n", optarg);
+                exit(64);
+            }
+            break;
+        case PRUNE_EMPTY:
+            arguments->prune_empty = 1;
             break;
         case 's': {
             const char *error = parse_size(optarg, &arguments->roof);
@@ -221,6 +280,9 @@ parse_arguments(int argc, char **argv, struct arguments *arguments)
                  "  -s, --size=SIZE    Maximum total size, e.g. 500M or 2G (required)\n"
                  "  -v, --verbose      Produce verbose output\n"
                  "  -f, --delete-open  Also delete files that are currently open\n"
+                 "  -r, --recursive    Track files at every depth\n"
+                 "      --evict-depth=DEPTH  Evict whole directories at DEPTH\n"
+                 "      --prune-empty  Remove directories emptied by file eviction\n"
                  "  -?, --help         Show help\n"
                  "      --usage        Show a short usage message\n"
                  "  -V, --version      Show the version");
@@ -237,6 +299,11 @@ parse_arguments(int argc, char **argv, struct arguments *arguments)
         exit(64);
     }
     arguments->dir = argv[optind];
+    const char *error = validate_recursive_options(arguments);
+    if (error != NULL) {
+        fprintf(stderr, "dirroof: %s\n", error);
+        exit(64);
+    }
 }
 #endif
 
@@ -652,16 +719,13 @@ handle_events(int fd)
 int
 main(int argc, char **argv)
 {
-    struct arguments arguments;
+    struct arguments arguments = { 0 };
     struct stat st;
     int mount_id;
     int epfd;
     struct epoll_event ev, events[8];
 
     /* Parse arguments */
-    arguments.verbose = 0;
-    arguments.roof = 0;
-    arguments.delete_open = 0;
     parse_arguments(argc, argv, &arguments);
 
     if (stat(arguments.dir, &st) == -1 || !S_ISDIR(st.st_mode)) {
@@ -683,6 +747,11 @@ main(int argc, char **argv)
     /* Line-buffered output, so verbose messages appear promptly even
        when stdout is a pipe or log file.  */
     setvbuf(stdout, NULL, _IOLBF, 0);
+
+    if (arguments.recursive) {
+        arguments.dir = watch_dir;
+        return watch_tree(&arguments);
+    }
 
     heap = calloc(MAXFILES, sizeof(*heap));
     if (heap == NULL) {

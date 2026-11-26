@@ -8,28 +8,62 @@
 | dir |
 ```
 
-`dirroof` allows you to specify a maximum size of a directory and deletes the oldest files in order to keep within this size.
+`dirroof` lets you set a size limit for a directory and evicts the least
+recently accessed files or subdirectories to stay within it.
 It is intended to be run as a daemon to give a maximum size to a directory.
 
-It uses `fanotify` (`FAN_REPORT_FID | FAN_REPORT_DFID_NAME`) and requires
-Linux 5.9+ (unprivileged use requires Linux 5.13+).
+The default mode uses `fanotify` (`FAN_REPORT_FID | FAN_REPORT_DFID_NAME`)
+and requires Linux 5.9+ (unprivileged use requires Linux 5.13+).
+Recursive mode uses `inotify`.
 
 ## Usage
 
 ```
-dirroof -s SIZE [-v] [-f] DIR
+dirroof -s SIZE [-v] [-f] [-r] [--evict-depth DEPTH | --prune-empty] DIR
 dirroof --version
 ```
 
-- `-s/--size SIZE` (required): the roofline — maximum total size of the
-  regular files directly inside `DIR`. Suffixes K, M, G, T are accepted
+- `-s/--size SIZE` (required): the maximum total size of the tracked
+  regular files. Suffixes K, M, G, T are accepted
   (e.g. `-s 2G`).
 - `-v/--verbose`: log tracked/deleted files and events.
 - `-f/--delete-open`: also delete files that are currently open (last
-  resort). By default open files are never unlinked.
+  resort). By default a file that dirroof observes as open protects its
+  entire eviction unit.
+- `-r/--recursive`: count regular files at every depth and evict them
+  individually. Empty directories are retained by default.
+- `--evict-depth DEPTH`: enable recursive mode and evict each directory
+  at that depth as a unit. The watched root is at depth 0 and its direct
+  subdirectories are at depth 1. Files outside those units remain
+  individually evictable.
+- `--prune-empty`: enable recursive mode and remove empty ancestors
+  after evicting a file. The watched root is kept. This option is
+  mutually exclusive with `--evict-depth`.
 - `-V/--version`: print the program version and exit.
 
+For workloads with one directory per job, the following command groups
+each job's outputs for eviction and limits the entire tree to 2 GiB.
+
+```sh
+dirroof -s 2G --evict-depth 1 "$RESULTS_DIR"
+```
+
 ## How it works
+
+In recursive mode, dirroof scans the tree and installs an inotify watch
+on each directory. It uses events to update file sizes, add new entries,
+and unregister subtrees that leave the tree. It rescans after an event
+queue overflow. This mode needs access to `/proc/self/fd` and is subject to
+the system's inotify watch limit.
+
+Eviction units sort by open count and then by last access time. For a
+directory unit, dirroof sums the open counts and uses the newest access
+time of any regular file in the unit. Only regular files count toward
+the size limit. Directory eviction also unlinks symlinks and other
+entries in the unit, without following symlinks.
+
+Without recursive mode, dirroof tracks up to 4096 regular files directly
+inside `DIR`.
 
 - Two fanotify groups are watched with epoll: one on `DIR` itself
   (`FAN_CREATE | FAN_DELETE | FAN_MOVED_FROM | FAN_MOVED_TO`), and one with
@@ -48,9 +82,10 @@ dirroof --version
   operation everything is event-driven and sizes/times are refreshed from
   the per-file events plus `stat()`.
 
-Caveats: fanotify merges same-inode events, so open counts are approximate;
-records are per path, so hard links may be mis-accounted; subdirectories
-and symlinks are ignored.
+Both modes track open counts from filesystem events, so counts are
+approximate. For example, files already open when tracking begins may
+be counted as closed. Records are per path, and hard links can be
+counted more than once.
 
 ## Static builds and packages
 

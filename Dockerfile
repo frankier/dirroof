@@ -10,7 +10,7 @@ COPY scripts/ scripts/
 RUN mkdir -p /out /root/.scratch && scdoc < dirroof.1.scd > /out/dirroof.1
 
 FROM package-tools AS build
-COPY dirroof.c Makefile ./
+COPY dirroof.c recursive.c recursive.h Makefile ./
 RUN version=$(cat VERSION) && \
     make CFLAGS=-O2 LDFLAGS=-static && mv dirroof /out/dirroof && \
     scripts/package-deb.sh /out/dirroof /out/dirroof.1 "$version" /out && \
@@ -53,7 +53,7 @@ RUN set -eu; \
     cd /opt/filc; \
     rm -rf /opt/filc-source
 WORKDIR /src
-COPY dirroof.c Makefile VERSION ./
+COPY dirroof.c recursive.c recursive.h Makefile VERSION ./
 RUN version=$(cat VERSION) && \
     make CC=/opt/filc/build/bin/clang CFLAGS=-O2 LDFLAGS="-static -Wl,--build-id" && \
     mv dirroof /dirroof-filc && \

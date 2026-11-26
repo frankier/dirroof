@@ -38,6 +38,11 @@ jobs:
           docker build --target filc-artifacts --output type=local,dest=dist-filc .
           mv dist/dirroof "dist/dirroof-${version}-linux-x86_64"
           mv dist-filc/dirroof-filc "dist-filc/dirroof-filc-${version}-linux-x86_64"
+      - name: Test recursive eviction
+        run: |
+          for binary in dist/dirroof-*-linux-x86_64 dist-filc/dirroof-filc-*-linux-x86_64; do
+            DIRROOF_BINARY="$binary" TMPDIR="$RUNNER_TEMP" python3 -m unittest discover -s tests
+          done
       - name: Test Fil-C fanotify
         run: |
           work=$(mktemp -d "$RUNNER_TEMP/dirroof.XXXXXXXX")
